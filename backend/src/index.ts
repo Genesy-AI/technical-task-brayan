@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 import express, { Request, Response } from 'express'
 import { Connection, Client } from '@temporalio/client'
-import { verifyEmailWorkflow } from './workflows'
+import { verifyEmailWorkflow, enrichPhoneWorkflow } from './workflows'
 import { generateMessageFromTemplate } from './utils/messageGenerator'
 import { runTemporalWorker } from './worker'
 import { isValidCountryCode } from './utils/countryCode'
@@ -324,6 +324,69 @@ app.post('/leads/verify-emails', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error verifying emails:', error)
     res.status(500).json({ error: 'Failed to verify emails' })
+  }
+})
+
+app.post('/leads/enrich-phone', async (req: Request, res: Response) => {
+  if (!req.body || typeof req.body !== 'object') {
+    return res.status(400).json({ error: 'Request body is required and must be valid JSON' })
+  }
+
+  const { leadIds } = req.body as { leadIds?: number[] }
+
+  if (!Array.isArray(leadIds) || leadIds.length === 0) {
+    return res.status(400).json({ error: 'leadIds must be a non-empty array' })
+  }
+
+  try {
+    const leads = await prisma.lead.findMany({
+      where: { id: { in: leadIds.map((id) => Number(id)) } },
+    })
+
+    if (leads.length === 0) {
+      return res.status(404).json({ error: 'No leads found with the provided IDs' })
+    }
+
+    // Mark all as pending immediately so the frontend can show progress
+    await prisma.lead.updateMany({
+      where: { id: { in: leads.map((l) => l.id) } },
+      data: { phoneEnrichStatus: 'pending' },
+    })
+
+    const connection = await Connection.connect({ address: 'localhost:7233' })
+    const client = new Client({ connection, namespace: 'default' })
+
+    let enrichedCount = 0
+    const errors: Array<{ leadId: number; leadName: string; error: string }> = []
+
+    for (const lead of leads) {
+      try {
+        await client.workflow.execute(enrichPhoneWorkflow, {
+          taskQueue: 'myQueue',
+          // Idempotent: one workflow per lead, reuse if already running
+          workflowId: `enrich-phone-${lead.id}`,
+          args: [{ id: lead.id, firstName: lead.firstName, lastName: lead.lastName, email: lead.email, companyName: lead.companyName }],
+        })
+        enrichedCount++
+      } catch (error) {
+        await prisma.lead.update({
+          where: { id: lead.id },
+          data: { phoneEnrichStatus: 'failed' },
+        })
+        errors.push({
+          leadId: lead.id,
+          leadName: `${lead.firstName} ${lead.lastName}`.trim(),
+          error: error instanceof Error ? error.message : 'Unknown error',
+        })
+      }
+    }
+
+    await connection.close()
+
+    res.json({ success: true, enrichedCount, errors })
+  } catch (error) {
+    console.error('Error enriching phones:', error)
+    res.status(500).json({ error: 'Failed to enrich phone numbers' })
   }
 })
 
