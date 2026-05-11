@@ -4,6 +4,7 @@ import { Connection, Client } from '@temporalio/client'
 import { verifyEmailWorkflow } from './workflows'
 import { generateMessageFromTemplate } from './utils/messageGenerator'
 import { runTemporalWorker } from './worker'
+import { isValidCountryCode } from './utils/countryCode'
 const prisma = new PrismaClient()
 const app = express()
 app.use(express.json())
@@ -221,13 +222,18 @@ app.post('/leads/bulk', async (req: Request, res: Response) => {
 
     for (const lead of uniqueLeads) {
       try {
+        const countryCode = lead.countryCode ? lead.countryCode.trim().toUpperCase() : null
+        if (countryCode && !isValidCountryCode(countryCode)) {
+          errors.push({ lead, error: `Invalid country code: "${countryCode}"` })
+          continue
+        }
         await prisma.lead.create({
           data: {
             firstName: lead.firstName.trim(),
             lastName: lead.lastName.trim(),
             email: lead.email.trim(),
             jobTitle: lead.jobTitle ? lead.jobTitle.trim() : null,
-            countryCode: lead.countryCode ? lead.countryCode.trim() : null,
+            countryCode,
             companyName: lead.companyName ? lead.companyName.trim() : null,
           },
         })
