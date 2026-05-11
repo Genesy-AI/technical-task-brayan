@@ -287,6 +287,11 @@ app.post('/leads/verify-emails', async (req: Request, res: Response) => {
     const errors: Array<{ leadId: number; leadName: string; error: string }> = []
 
     for (const lead of leads) {
+      if (lead.emailVerified !== null && lead.emailVerified !== undefined) {
+        results.push({ leadId: lead.id, emailVerified: lead.emailVerified })
+        continue
+      }
+
       try {
         const isVerified = await client.workflow.execute(verifyEmailWorkflow, {
           taskQueue: 'myQueue',
