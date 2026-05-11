@@ -7,6 +7,9 @@ export interface CsvLead {
   jobTitle?: string
   countryCode?: string
   companyName?: string
+  phoneNumber?: string
+  yearsAtCompany?: number
+  linkedinUrl?: string
   isValid: boolean
   errors: string[]
   rowIndex: number
@@ -85,6 +88,16 @@ export const parseCsv = (content: string): CsvLead[] => {
         case 'companyname':
           lead.companyName = trimmedValue || undefined
           break
+        case 'phonenumber':
+          lead.phoneNumber = trimmedValue || undefined
+          break
+        case 'yearsatcompany':
+        case 'yearsinrole':
+          lead.yearsAtCompany = trimmedValue ? Number(trimmedValue) : undefined
+          break
+        case 'linkedinurl':
+          lead.linkedinUrl = trimmedValue || undefined
+          break
       }
     })
 
@@ -102,6 +115,9 @@ export const parseCsv = (content: string): CsvLead[] => {
     }
     if (lead.countryCode && !isValidCountryCode(lead.countryCode)) {
       errors.push(`Invalid country code: "${lead.countryCode}"`)
+    }
+    if (lead.yearsAtCompany !== undefined && (isNaN(lead.yearsAtCompany) || lead.yearsAtCompany < 0)) {
+      errors.push('Years at company must be a non-negative number')
     }
 
     data.push({
